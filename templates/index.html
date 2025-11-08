@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VM管理</title>
+  <style>:root {
+  --bg: #0f1216;
+  --panel: #181c22;
+  --muted: #93a1b1;
+  --text: #e6edf3;
+  --accent: #4f8cff;
+  --accent-2: #00c2a8;
+  --danger: #ff5c5c;
+  --border: #27303b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", "Helvetica Neue", Arial;
+  background: var(--bg); color: var(--text);
+}
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: #0c0f13;
+}
+.brand { font-weight: 700; letter-spacing: .2px; }
+.tabs { display: flex; gap: 8px; }
+.tab-btn {
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+  padding: 8px 12px; border-radius: 8px; cursor: pointer;
+}
+.tab-btn.active { background: var(--panel); border-color: var(--accent); }
+.auth #authBtn { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+
+main { padding: 16px; max-width: 1200px; margin: 0 auto; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.panel-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.controls { display: flex; gap: 8px; }
+.controls input, .controls select, .controls button {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: #12161b; color: var(--text);
+}
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.card {
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: #141920;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.card .title { font-weight: 600; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.95rem; color: var(--muted); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.actions button {
+  padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: #0e1319; color: var(--text); cursor: pointer;
+}
+.actions button.primary { border-color: var(--accent); }
+.actions button.danger { border-color: var(--danger); color: #ffdede; }
+
+.form { display: flex; flex-direction: column; gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+label { display: flex; flex-direction: column; gap: 6px; }
+input, textarea, select {
+  padding: 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: #12161b; color: var(--text); font-family: inherit;
+}
+.textarea textarea { min-height: 160px; }
+.advanced summary { cursor: pointer; color: var(--muted); }
+.form-actions { display: flex; gap: 8px; }
+button.secondary { opacity: 0.8; }
+
+.console-frame { height: 70vh; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: #0d1117; }
+.console-frame iframe { width: 100%; height: 100%; border: 0; }
+
+.footer { display: flex; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--border); color: var(--muted); }
+
+.toast {
+  position: fixed; right: 16px; bottom: 16px;
+  background: #122135; color: var(--text);
+  padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border);
+  opacity: 0; transform: translateY(10px); transition: all .2s ease; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">VM管理</div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">ダッシュボード</button>
+      <button class="tab-btn" data-tab="create">作成</button>
+      <button class="tab-btn" data-tab="console">コンソール</button>
+    </nav>
+    <div class="auth">
+      <button id="authBtn" title="認証トークン設定">Auth</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Dashboard -->
+    <section id="tab-dashboard" class="tab active">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>VM一覧</h2>
+          <div class="controls">
+            <input id="search" type="search" placeholder="検索（名前）" />
+            <select id="sortBy">
+              <option value="name">名前</option>
+              <option value="state">状態</option>
+              <option value="vcpus">VCPU</option>
+              <option value="memory_kib">メモリ</option>
+            </select>
+            <button id="refreshBtn">再読み込み</button>
+          </div>
+        </div>
+        <div id="vmList" class="cards"></div>
+      </div>
+    </section>
+
+    <!-- Create -->
+    <section id="tab-create" class="tab">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>VM作成</h2>
+        </div>
+        <form id="createForm" class="form">
+          <div class="grid">
+            <label>
+              <span>名前</span>
+              <input name="name" required minlength="1" maxlength="64" />
+            </label>
+            <label>
+              <span>VCPU</span>
+              <input name="vcpus" type="number" min="1" max="64" value="2" />
+            </label>
+            <label>
+              <span>メモリ（MB）</span>
+              <input name="memory_mb" type="number" min="256" max="262144" value="2048" />
+            </label>
+            <label>
+              <span>ディスク（GB）</span>
+              <input name="disk_gb" type="number" min="1" max="2048" value="20" />
+            </label>
+            <label>
+              <span>ブリッジ</span>
+              <input name="bridge" value="br0" />
+            </label>
+            <label>
+              <span>ISOパス（任意）</span>
+              <input name="iso_path" placeholder="/var/lib/libvirt/images/installer.iso" />
+            </label>
+          </div>
+
+          <details class="advanced">
+            <summary>cloud-init（任意）</summary>
+            <label class="textarea">
+              <span>user-data.yaml</span>
+              <textarea name="cloud_user_data" placeholder="#cloud-config
+users:
+  - name: arch
+    groups: sudo
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA..."></textarea>
+            </label>
+            <label class="textarea">
+              <span>meta-data.yaml</span>
+              <textarea name="cloud_meta_data" placeholder="instance-id: vm-001
+local-hostname: vm-001"></textarea>
+            </label>
+          </details>
+
+          <div class="form-actions">
+            <button type="submit">作成</button>
+            <button type="reset" class="secondary">リセット</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Console -->
+    <section id="tab-console" class="tab">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>コンソール</h2>
+          <div class="controls">
+            <input id="consoleVmName" placeholder="VM名を入力" />
+            <button id="openConsoleBtn">開く</button>
+          </div>
+        </div>
+        <div class="console-frame">
+          <iframe id="novncFrame" title="noVNC" src="" allowfullscreen></iframe>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>© あなたのOS</span>
+    <span id="statusMsg"></span>
+  </footer>
+
+  <div id="toast" class="toast"></div>
+
+  <script>// ---- Config ----
+const API_BASE = '/api/v1';
+const STORAGE_KEY = 'vmapp.token';
+
+// ---- State ----
+let authToken = localStorage.getItem(STORAGE_KEY) || '';
+let vms = [];
+
+// ---- Utilities ----
+function setStatus(msg) {
+  document.getElementById('statusMsg').textContent = msg || '';
+}
+function toast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  t.style.borderColor = type === 'error' ? 'var(--danger)' : 'var(--accent-2)';
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+async function api(path, opts = {}) {
+  const headers = Object.assign({'Content-Type': 'application/json'}, opts.headers || {});
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  const res = await fetch(`${API_BASE}${path}`, Object.assign(opts, { headers }));
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  const ct = res.headers.get('Content-Type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
+}
+function humanState(code) {
+  // libvirt DomainState mapping (simplified)
+  const map = {
+    0: '未定義', 1: '実行中', 2: 'ブロック', 3: '一時停止', 4: 'シャットダウン中', 5: '停止', 6: 'クラッシュ', 7: '悪用'
+  };
+  return map[code] || `state:${code}`;
+}
+function kibToMb(kib) { return Math.round((kib || 0) / 1024); }
+
+// ---- Tabs ----
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+  });
+});
+
+// ---- Auth ----
+document.getElementById('authBtn').addEventListener('click', async () => {
+  const token = prompt('Bearerトークンを入力してください', authToken || '');
+  if (token === null) return;
+  authToken = token.trim();
+  localStorage.setItem(STORAGE_KEY, authToken);
+  toast('トークンを保存しました');
+  await loadVMs();
+});
+
+// ---- Dashboard ----
+async function loadVMs() {
+  try {
+    setStatus('読み込み中...');
+    vms = await api('/vms', { method: 'GET' });
+    renderVMs();
+    setStatus(`読み込み完了: ${vms.length}件`);
+  } catch (e) {
+    console.error(e);
+    toast(`VM一覧の取得に失敗: ${e.message}`, 'error');
+    setStatus('');
+  }
+}
+function renderVMs() {
+  const list = document.getElementById('vmList');
+  const q = document.getElementById('search').value.toLowerCase();
+  const sortBy = document.getElementById('sortBy').value;
+
+  let filtered = vms.filter(v => v.name.toLowerCase().includes(q));
+  filtered.sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    return (a[sortBy] || 0) - (b[sortBy] || 0);
+  });
+
+  list.innerHTML = '';
+  for (const v of filtered) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="title">${v.name}</div>
+      <div class="kv">
+        <div><strong>状態:</strong> ${humanState(v.state)}</div>
+        <div><strong>VCPU:</strong> ${v.vcpus}</div>
+        <div><strong>メモリ:</strong> ${kibToMb(v.memory_kib)} MB</div>
+        <div><strong>UUID:</strong> ${v.uuid}</div>
+      </div>
+      <div class="actions">
+        <button class="primary" data-act="start">起動</button>
+        <button data-act="shutdown">停止</button>
+        <button data-act="reboot">再起動</button>
+        <button class="danger" data-act="destroy">強制停止</button>
+        <button class="danger" data-act="delete">削除</button>
+        <button data-act="console">コンソール</button>
+      </div>
+    `;
+    const actions = card.querySelectorAll('.actions button');
+    actions.forEach(btn => btn.addEventListener('click', () => handleAction(v.name, btn.dataset.act)));
+    list.appendChild(card);
+  }
+}
+async function handleAction(name, act) {
+  try {
+    if (act === 'delete') {
+      if (!confirm(`VM「${name}」を削除します。よろしいですか？`)) return;
+      // 任意で専用DELETEエンドポイントに合わせる。ここではdestroy→undefineを想定。
+      await api(`/vms/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast('削除しました'); await loadVMs(); return;
+    }
+    if (act === 'console') {
+      await openConsole(name); return;
+    }
+    await api(`/vms/${encodeURIComponent(name)}/power`, {
+      method: 'POST',
+      body: JSON.stringify({ action: act })
+    });
+    toast(`アクション完了: ${act}`);
+    await loadVMs();
+  } catch (e) {
+    console.error(e);
+    toast(`操作失敗: ${e.message}`, 'error');
+  }
+}
+document.getElementById('refreshBtn').addEventListener('click', loadVMs);
+document.getElementById('search').addEventListener('input', renderVMs);
+document.getElementById('sortBy').addEventListener('change', renderVMs);
+
+// ---- Create ----
+document.getElementById('createForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const payload = Object.fromEntries([...fd.entries()].map(([k,v]) => [k, v.trim()]));
+  payload.vcpus = Number(payload.vcpus);
+  payload.memory_mb = Number(payload.memory_mb);
+  payload.disk_gb = Number(payload.disk_gb);
+
+  try {
+    // cloud-initは別APIに分けたい場合は分岐。ここではcreateのbodyに同梱→バックエンド側でseed作成に対応。
+    await api('/vms', { method: 'POST', body: JSON.stringify(payload) });
+    toast('VMを作成しました');
+    ev.target.reset();
+    // ダッシュボードに切替＆更新
+    document.querySelector('.tab-btn[data-tab="dashboard"]').click();
+    await loadVMs();
+  } catch (e) {
+    console.error(e);
+    toast(`作成失敗: ${e.message}`, 'error');
+  }
+});
+
+// ---- Console ----
+async function openConsole(nameOrNull) {
+  try {
+    const name = nameOrNull || document.getElementById('consoleVmName').value.trim();
+    if (!name) { toast('VM名を入力してください', 'error'); return; }
+    const info = await api(`/vms/${encodeURIComponent(name)}/console`, { method: 'GET' });
+    // 期待: { novnc_url: '/vnc/<idx>/vnc.html?host=vm.local&port=443&path=/vnc/<idx>/' }
+    document.getElementById('novncFrame').src = info.novnc_url;
+    // タブ切替
+    document.querySelector('.tab-btn[data-tab="console"]').click();
+    toast('コンソールを開きました');
+  } catch (e) {
+    console.error(e);
+    toast(`コンソール取得失敗: ${e.message}`, 'error');
+  }
+}
+document.getElementById('openConsoleBtn').addEventListener('click', () => openConsole(null));
+
+// ---- Init ----
+window.addEventListener('DOMContentLoaded', async () => {
+  // 既存トークンで自動ロード
+  if (authToken) {
+    loadVMs();
+  } else {
+    toast('右上のAuthからトークンを設定してください');
+  }
+});
+</script>
+</body>
+</html>
